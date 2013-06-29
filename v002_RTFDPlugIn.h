@@ -13,42 +13,8 @@
 #import "v002RTFDProvider.h"
 
 @interface v002_RTFDPlugIn : QCPlugIn
-{
-    dispatch_queue_t rtfdQueue;
-    
-    v002RTFDProvider *provider;
-    
-    NSTextStorage* drawString;    
-    NSLayoutManager *layoutManager; 
-    NSTextContainer *textContainer; 
-    
-    CGFloat stringSize;
-    OSSpinLock _providerLock;
-        
-    NSUInteger width;
-    NSUInteger height;
-    double scroll;
-    
-    BOOL antialias;
-    BOOL fontSmoothing;
-}
 
-- (v002RTFDProvider *)newProvider;
-- (void)setAvailableProvider:(v002RTFDProvider *)provider;
-//@property (retain) NSAttributedString* drawString;
-
-@property (retain) NSTextStorage * drawString;
-@property (retain) NSLayoutManager *layoutManager; 
-@property (retain) NSTextContainer *textContainer; 
-@property (readwrite) CGFloat stringSize;
-@property (readwrite, assign) BOOL antialias;
-@property (readwrite, assign) BOOL fontSmoothing;
-
-@property (assign) NSUInteger width;
-@property (assign) NSUInteger height;
-@property (assign) double scroll;
-
-@property (assign) NSString* inputPath;
+@property (strong) NSString* inputPath;
 @property (assign) BOOL inputReload;
 @property (assign) NSUInteger inputWidth;
 @property (assign) NSUInteger inputHeight;
@@ -59,7 +25,18 @@
 @property (assign) BOOL inputFontSmoothing;
 @property (assign) BOOL inputAsyncronous;
 
-@property (assign) id <QCPlugInOutputImageProvider> outputImage;
+@property (strong) id <QCPlugInOutputImageProvider> outputImage;
+
+@property (strong) NSString* outputString;
+@property (strong) NSArray* outputWords;
+@property (strong) NSArray* outputSentences;
+@property (strong) NSArray* outputLineEndings;
+@property (strong) NSArray* outputParagraphs;
+
+@property (copy) NSString* outputCurrentWord;
+@property (copy) NSString* outputCurrentSentence;
+@property (copy) NSString* outputCurrentLineEnding;
+@property (copy) NSString* outputCurrentParagraph;
 
 @end
 

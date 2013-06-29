@@ -16,22 +16,13 @@
     self = [super init];
     if (self)
     {
-        _imageRep = [imageRep retain];
+        _imageRep = imageRep;
     }
     
     return self;
 }
 
-- (void)finalize
-{
-	[super finalize];
-}
 
-- (void)dealloc
-{
-    [_imageRep release];
-	[super dealloc];
-}
 
 - (NSRect)imageBounds
 {
@@ -55,10 +46,10 @@
 	switch ([[_imageRep colorSpace] colorSpaceModel])
 	{
 		case NSRGBColorSpaceModel:
-			formats = [NSArray arrayWithObjects:QCPlugInPixelFormatBGRA8, QCPlugInPixelFormatARGB8, QCPlugInPixelFormatRGBAf, nil];
+			formats = @[QCPlugInPixelFormatBGRA8, QCPlugInPixelFormatARGB8, QCPlugInPixelFormatRGBAf];
 			break;
 		case NSGrayColorSpaceModel:
-			formats = [NSArray arrayWithObjects:QCPlugInPixelFormatI8, QCPlugInPixelFormatIf, nil];
+			formats = @[QCPlugInPixelFormatI8, QCPlugInPixelFormatIf];
 			break;
 		default:
 			formats = nil;
@@ -140,26 +131,26 @@
         {
             if (bitmapFormat & NSAlphaFirstBitmapFormat)
             {
-                formats = [NSArray arrayWithObject:QCPlugInPixelFormatARGB8];
+                formats = @[QCPlugInPixelFormatARGB8];
             }
             else
             {
-                formats = [NSArray arrayWithObject:QCPlugInPixelFormatBGRA8];
+                formats = @[QCPlugInPixelFormatBGRA8];
             }
         }
         else if (!(bitmapFormat & NSAlphaFirstBitmapFormat)) // RGBAf
         {
-            formats = [NSArray arrayWithObject:QCPlugInPixelFormatRGBAf];
+            formats = @[QCPlugInPixelFormatRGBAf];
         }
     }
     else if ([_imageRep samplesPerPixel] == 1)
     {
         if (bitmapFormat & NSFloatingPointSamplesBitmapFormat)
         {
-            formats = [NSArray arrayWithObject:QCPlugInPixelFormatIf];
+            formats = @[QCPlugInPixelFormatIf];
         } else
         {
-            formats = [NSArray arrayWithObject:QCPlugInPixelFormatI8];
+            formats = @[QCPlugInPixelFormatI8];
         }
     }
     

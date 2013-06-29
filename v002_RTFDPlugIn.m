@@ -15,17 +15,41 @@
 #define	kQCPlugIn_Description		@"v002 RTFD description"
 #define	kQCPlugIn_Category          [NSArray arrayWithObject:@"v002"]
 
-@implementation v002_RTFDPlugIn
+@interface v002_RTFDPlugIn ()
 
-@synthesize drawString;
-@synthesize layoutManager;
-@synthesize textContainer;
-@synthesize stringSize;
-@synthesize width;
-@synthesize height;
-@synthesize scroll;
-@synthesize antialias;
-@synthesize fontSmoothing;
+{
+    v002RTFDProvider *provider;
+    OSSpinLock _providerLock;
+}
+@property (atomic, readwrite, strong) dispatch_queue_t rtfdQueue;
+
+@property (atomic, readwrite, strong) NSTextStorage * drawString;
+@property (atomic, readwrite, strong) NSLayoutManager *layoutManager;
+@property (atomic, readwrite, strong) NSTextContainer *textContainer;
+@property (atomic, readwrite, assign) CGFloat stringSize;
+@property (atomic, readwrite, assign) BOOL antialias;
+@property (atomic, readwrite, assign) BOOL fontSmoothing;
+
+@property (atomic, readwrite, assign) NSUInteger width;
+@property (atomic, readwrite, assign) NSUInteger height;
+@property (atomic, readwrite, assign) double scroll;
+
+@property (atomic, readwrite, assign) CFStringTokenizerRef wordTokenizer;
+@property (atomic, readwrite, assign) CFStringTokenizerRef sentenceTokenizer;
+@property (atomic, readwrite, assign) CFStringTokenizerRef paragraphTokenizer;
+@property (atomic, readwrite, assign) CFStringTokenizerRef lineTokenizer;
+
+@property (atomic, readwrite, strong) NSMutableArray* wordArray;
+@property (atomic, readwrite, strong) NSMutableArray* sentenceArray;
+@property (atomic, readwrite, strong) NSMutableArray* paragraphArray;
+@property (atomic, readwrite, strong) NSMutableArray* lineArray;
+
+- (v002RTFDProvider *)newProvider;
+- (void)setAvailableProvider:(v002RTFDProvider *)provider;
+
+@end
+
+@implementation v002_RTFDPlugIn
 
 @dynamic inputPath;
 @dynamic inputReload;
@@ -40,84 +64,129 @@
 
 @dynamic outputImage;
 
+@dynamic outputString;
+@dynamic outputWords;
+@dynamic outputSentences;
+@dynamic outputLineEndings;
+@dynamic outputParagraphs;
+
+@dynamic outputCurrentWord;
+@dynamic outputCurrentSentence;
+@dynamic outputCurrentLineEnding;
+@dynamic outputCurrentParagraph;
+
 + (NSDictionary*) attributes
 {
-	return [NSDictionary dictionaryWithObjectsAndKeys:kQCPlugIn_Name, QCPlugInAttributeNameKey,
-            kQCPlugIn_Description, QCPlugInAttributeDescriptionKey, 
-            kQCPlugIn_Category, @"categories", nil];
+	return @{QCPlugInAttributeNameKey: kQCPlugIn_Name,
+            QCPlugInAttributeDescriptionKey: kQCPlugIn_Description, 
+            @"categories": kQCPlugIn_Category};
 }
 
 + (NSDictionary*) attributesForPropertyPortWithKey:(NSString*)key
 {	
-    
 	if([key isEqualToString:@"inputPath"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Path", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Path"};
 	}
 
     if([key isEqualToString:@"inputReload"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Reload File", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Reload File"};
 	}
 
     if([key isEqualToString:@"inputWidth"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Width", QCPortAttributeNameKey,
-                [NSNumber numberWithUnsignedInteger:1], QCPortAttributeMinimumValueKey,
-                [NSNumber numberWithUnsignedInteger:640], QCPortAttributeDefaultValueKey, nil];
+		return @{QCPortAttributeNameKey: @"Width",
+                QCPortAttributeMinimumValueKey: @1U,
+                QCPortAttributeDefaultValueKey: @640U};
 	}
 
     if([key isEqualToString:@"inputHeight"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Height", QCPortAttributeNameKey,
-                [NSNumber numberWithUnsignedInteger:1], QCPortAttributeMinimumValueKey,
-                [NSNumber numberWithUnsignedInteger:480], QCPortAttributeDefaultValueKey, nil];
+		return @{QCPortAttributeNameKey: @"Height",
+                QCPortAttributeMinimumValueKey: @1U,
+                QCPortAttributeDefaultValueKey: @480U};
 	}
 
     if([key isEqualToString:@"inputScroll"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Scroll", QCPortAttributeNameKey,
-                [NSNumber numberWithDouble:0], QCPortAttributeMinimumValueKey,
-                [NSNumber numberWithDouble:1], QCPortAttributeMaximumValueKey,
-                [NSNumber numberWithDouble:0], QCPortAttributeDefaultValueKey, nil];
+		return @{QCPortAttributeNameKey: @"Scroll",
+                QCPortAttributeMinimumValueKey: @0.0,
+                QCPortAttributeMaximumValueKey: @1.0,
+                QCPortAttributeDefaultValueKey: @0.0};
 	}
     
     if([key isEqualToString:@"inputPageUp"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Page Up", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Page Up"};
 	}
     
     if([key isEqualToString:@"inputPageDown"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Page Down", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Page Down"};
 	}
 
     if([key isEqualToString:@"inputAsyncronous"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Asyncronous Rendering", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Asyncronous Rendering"};
 	}
 
     if([key isEqualToString:@"inputAntialias"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Antialias", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Antialias"};
 	}
 
     if([key isEqualToString:@"inputFontSmoothing"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Font Smoothing", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Font Smoothing"};
 	}
 
     if([key isEqualToString:@"outputImage"])
 	{
-		return [NSDictionary dictionaryWithObjectsAndKeys:@"Image", QCPortAttributeNameKey, nil];
+		return @{QCPortAttributeNameKey: @"Image"};
 	}
+	
+	if([key isEqualToString:@"outputString"])
+	{
+		return @{QCPortAttributeNameKey: @"String"};
+	}
+	
+	if([key isEqualToString:@"outputWords"])
+	{
+		return @{QCPortAttributeNameKey: @"Words"};
+	}
+
+	if([key isEqualToString:@"outputSentences"])
+	{
+		return @{QCPortAttributeNameKey: @"Sentences"};
+	}
+
+	if([key isEqualToString:@"outputParagraphs"])
+	{
+		return @{QCPortAttributeNameKey: @"Paragraphs"};
+	}
+
+	if([key isEqualToString:@"outputCurrentWord"])
+	{
+		return @{QCPortAttributeNameKey: @"Current String"};
+	}
+	
+	if([key isEqualToString:@"outputCurrentSentence"])
+	{
+		return @{QCPortAttributeNameKey: @"Current Sentence"};
+	}
+
+	if([key isEqualToString:@"outputCurrentParagraph"])
+	{
+		return @{QCPortAttributeNameKey: @"Current Paragraph"};
+	}	
     
     return nil;
 }
 
 + (NSArray*) sortedPropertyPortKeys
 {
-    return [NSArray arrayWithObjects:@"inputPath",
+    return @[@"inputPath",
             @"inputReload",
             @"inputScroll",
             @"inputWidth",
@@ -127,7 +196,15 @@
             @"inputAsyncronous"
             @"inputAntialias",
             @"inputFontSmoothing",
-            @"outputImage", nil];
+
+            @"outputImage",
+			@"outputString",
+			@"outputWords",
+			@"outputSentences",
+			@"outputParagraphs",
+			@"outputCurrentWord",
+			@"outputCurrentSentence",
+			@"outputCurrentParagraph"];
 }
 
 
@@ -146,7 +223,7 @@
     self = [super init];
 	if(self)
     {
-        rtfdQueue = dispatch_queue_create("info.v002.rtfdQueue", NULL);
+        self.rtfdQueue = dispatch_queue_create("info.v002.rtfdQueue", NULL);
                 
         _providerLock = OS_SPINLOCK_INIT;
 	}
@@ -154,18 +231,20 @@
 	return self;
 }
 
-- (void) finalize
-{
-    dispatch_release(rtfdQueue);
-	[super finalize];
-}
 
 - (void) dealloc
 {
-    dispatch_release(rtfdQueue);
-    
-    self.drawString = nil;
-	[super dealloc];
+	if(self.wordTokenizer)
+		CFRelease(self.wordTokenizer);
+	
+	if(self.sentenceTokenizer)
+		CFRelease(self.sentenceTokenizer);
+
+	if(self.sentenceTokenizer)
+		CFRelease(self.sentenceTokenizer);
+
+	if(self.lineTokenizer)
+		CFRelease(self.lineTokenizer);
 }
 
 - (v002RTFDProvider *)newProvider
@@ -179,9 +258,7 @@
 
 - (void)setAvailableProvider:(v002RTFDProvider *)prov
 {
-    [prov retain];
     OSSpinLockLock(&_providerLock);
-    [provider release];
     provider = prov;
     OSSpinLockUnlock(&_providerLock);
 }
@@ -207,15 +284,18 @@
 {
     if([self didValueForInputKeyChange:@"inputPath"] || self.inputReload)
     {
-        self.drawString = [[[NSTextStorage alloc] initWithPath:self.inputPath documentAttributes:NULL] autorelease];
+        self.drawString = [[NSTextStorage alloc] initWithPath:self.inputPath documentAttributes:NULL];
         
+		// get our string, and pull our token counts from it
+		[self buildTokenArrays];
+		
         // TODO: this could probably be optimized away.
         self.stringSize = [self.drawString size].height;
     
-        self.layoutManager = [[[NSLayoutManager alloc] init] autorelease];
+        self.layoutManager = [[NSLayoutManager alloc] init];
         [self.layoutManager setUsesScreenFonts:NO];
 
-        self.textContainer = [[[NSTextContainer alloc] initWithContainerSize:NSMakeSize(self.inputWidth, FLT_MAX)] autorelease];        
+        self.textContainer = [[NSTextContainer alloc] initWithContainerSize:NSMakeSize(self.inputWidth, FLT_MAX)];        
         
         [self.layoutManager addTextContainer:self.textContainer];
         
@@ -223,6 +303,17 @@
 
         // Force layout calculation (?)
         [self.layoutManager glyphRangeForTextContainer:self.textContainer];
+		
+		self.outputString = self.drawString.string;
+		self.outputWords = self.wordArray;
+		self.outputSentences = self.sentenceArray;
+		self.outputLineEndings = self.lineArray;
+		self.outputParagraphs = self.paragraphArray;
+		
+		self.outputCurrentWord = self.wordArray[0];
+		self.outputCurrentSentence = self.sentenceArray[0];
+		self.outputCurrentLineEnding = self.lineArray[0];
+		self.outputCurrentParagraph = self.paragraphArray[0];
     }
     
     if([self didValueForInputKeyChange:@"inputAntialias"])
@@ -231,27 +322,37 @@
     if([self didValueForInputKeyChange:@"inputWidth"])
         [self.textContainer setContainerSize:NSMakeSize(self.inputWidth, FLT_MAX)];
     
-    if([self didValueForInputKeyChange:@"inputWidth"] || [self didValueForInputKeyChange:@"inputHeight"] || [self didValueForInputKeyChange:@"inputScroll"]
-       || [self didValueForInputKeyChange:@"inputPageUp"] || [self didValueForInputKeyChange:@"inputPageDown"] )
+    if([self didValueForInputKeyChange:@"inputWidth"] ||
+	   [self didValueForInputKeyChange:@"inputHeight"] ||
+	   [self didValueForInputKeyChange:@"inputScroll"] ||
+	   [self didValueForInputKeyChange:@"inputPageUp"] ||
+	   [self didValueForInputKeyChange:@"inputPageDown"] )
     {        
         
         if([self didValueForInputKeyChange:@"inputPageUp"])
         {
             double pageFactor =  self.inputHeight/self.stringSize;
-            
             self.scroll = self.scroll - pageFactor;
-            NSLog(@"Scroll, %f, factor %f", self.scroll, pageFactor);
         }
         else if([self didValueForInputKeyChange:@"inputPageDown"])
         {
             double pageFactor =  self.inputHeight/self.stringSize;
             
             self.scroll = self.scroll + pageFactor;
-            
-            NSLog(@"Scroll, %f, factor %f", self.scroll, pageFactor);
         }
-            self.scroll = self.inputScroll;
-
+        
+		self.scroll = self.inputScroll;
+		
+		NSUInteger scrollIndexForWord = (NSUInteger)(self.scroll * ((double)self.wordArray.count - 1));
+		NSUInteger scrollIndexForSentence = (NSUInteger)(self.scroll * ((double)self.sentenceArray.count - 1));
+		NSUInteger scrollIndexForLine = (NSUInteger)(self.scroll * ((double)self.lineArray.count - 1));
+		NSUInteger scrollIndexForParagraph = (NSUInteger)(self.scroll * ((double)self.paragraphArray.count - 1));
+		
+		self.outputCurrentWord = self.wordArray[scrollIndexForWord];
+		self.outputCurrentSentence = self.sentenceArray[scrollIndexForSentence];
+		self.outputCurrentLineEnding = self.lineArray[scrollIndexForLine];
+		self.outputCurrentParagraph = self.paragraphArray[scrollIndexForParagraph];
+		
         if(self.inputWidth >=100 && self.inputHeight >= 100)
         {
             if(self.inputAsyncronous)
@@ -272,7 +373,6 @@
     if (prov)
     {
         self.outputImage = prov;
-        [prov release];
     }
 
 	return YES;
@@ -283,7 +383,7 @@
     // Use our own queue, so we have asyncronous, but serial provider creation.
     // we use our own background GL context to do our uploading. Yay and shit.
 
-    dispatch_async(rtfdQueue, ^{
+    dispatch_async(self.rtfdQueue, ^{
     
         [self createOutputImageWithContext:context width:w height:h];
         
@@ -334,9 +434,9 @@
 
         [flipped setShouldAntialias:self.antialias];
         
-        CGContextSetAllowsFontSmoothing([flipped graphicsPort], fontSmoothing);
-        CGContextSetAllowsFontSubpixelPositioning([flipped graphicsPort], fontSmoothing);
-        CGContextSetAllowsFontSubpixelQuantization([flipped graphicsPort], fontSmoothing);
+        CGContextSetAllowsFontSmoothing([flipped graphicsPort], self.fontSmoothing);
+        CGContextSetAllowsFontSubpixelPositioning([flipped graphicsPort], self.fontSmoothing);
+        CGContextSetAllowsFontSubpixelQuantization([flipped graphicsPort], self.fontSmoothing);
         
         
         
@@ -363,9 +463,94 @@
         
         v002RTFDProvider *prov = [[v002RTFDProvider alloc] initWithBitmapImageRep:bitmapImage];
         [self setAvailableProvider:prov];
-        [prov release];
     }
-    [bitmapImage release];
+}
+
+- (void) buildTokenArrays
+{
+	// reset all of our internal arrays
+	self.wordArray = [NSMutableArray array];
+	self.sentenceArray = [NSMutableArray array];
+	self.paragraphArray = [NSMutableArray array];
+	self.lineArray = [NSMutableArray array];
+	
+	CFLocaleRef locale = CFLocaleCopyCurrent();
+
+	NSString* string = self.drawString.string;
+	
+	// Build our various tokenizer if we need to, otherwise re-assign them.
+	
+	// Word
+	if(!self.wordTokenizer)
+		self.wordTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitWord, locale);
+	else
+		CFStringTokenizerSetString(self.wordTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
+	
+	// Sentence
+	if(!self.sentenceTokenizer)
+		self.sentenceTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitSentence, locale);
+	else
+		CFStringTokenizerSetString(self.sentenceTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
+	
+	// Paragraph
+	if(!self.paragraphTokenizer)
+		self.paragraphTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitParagraph, locale);
+	else
+		CFStringTokenizerSetString(self.paragraphTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
+	
+	// Line
+	if(!self.lineTokenizer)
+		self.lineTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitLineBreak, locale);
+	else
+		CFStringTokenizerSetString(self.lineTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
+	
+	// Fill our arrays with the tokenizers output.
+	
+	// Word
+	CFStringTokenizerTokenType tokenType = kCFStringTokenizerTokenNone;
+	
+	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.wordTokenizer)))
+	{
+		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.wordTokenizer);
+		
+		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
+
+		[self.wordArray addObject:[string substringWithRange:tokenRange]];
+	}
+
+	tokenType = kCFStringTokenizerTokenNone;
+	
+	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.sentenceTokenizer)))
+	{
+		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.sentenceTokenizer);
+		
+		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
+		
+		[self.sentenceArray addObject:[string substringWithRange:tokenRange]];
+	}
+	
+	tokenType = kCFStringTokenizerTokenNone;
+	
+	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.paragraphTokenizer)))
+	{
+		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.paragraphTokenizer);
+		
+		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
+		
+		[self.paragraphArray addObject:[string substringWithRange:tokenRange]];
+	}
+	
+	tokenType = kCFStringTokenizerTokenNone;
+	
+	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.lineTokenizer)))
+	{
+		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.lineTokenizer);
+		
+		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
+		
+		[self.lineArray addObject:[string substringWithRange:tokenRange]];
+	}
 }
 
 @end
+
