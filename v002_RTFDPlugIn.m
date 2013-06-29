@@ -360,10 +360,17 @@
 		NSUInteger scrollIndexForLine = (NSUInteger)(self.scroll * ((double)self.lineArray.count - 1));
 		NSUInteger scrollIndexForParagraph = (NSUInteger)(self.scroll * ((double)self.paragraphArray.count - 1));
 		
-		self.outputCurrentWord = self.wordArray[scrollIndexForWord];
-		self.outputCurrentSentence = self.sentenceArray[scrollIndexForSentence];
-		self.outputCurrentLineEnding = self.lineArray[scrollIndexForLine];
-		self.outputCurrentParagraph = self.paragraphArray[scrollIndexForParagraph];
+		if([self.wordArray count] > scrollIndexForWord)
+			self.outputCurrentWord = self.wordArray[scrollIndexForWord];
+		
+		if([self.sentenceArray count] > scrollIndexForSentence)
+			self.outputCurrentSentence = self.sentenceArray[scrollIndexForSentence];
+		
+		if([self.lineArray count] > scrollIndexForLine)
+			self.outputCurrentLineEnding = self.lineArray[scrollIndexForLine];
+
+		if([self.paragraphArray count] > scrollIndexForParagraph)
+			self.outputCurrentParagraph = self.paragraphArray[scrollIndexForParagraph];
 		
         if(self.inputWidth >=100 && self.inputHeight >= 100)
         {
