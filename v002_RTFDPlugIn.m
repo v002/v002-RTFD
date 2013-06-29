@@ -322,10 +322,17 @@
 		self.outputLineEndings = self.lineArray;
 		self.outputParagraphs = self.paragraphArray;
 		
-		self.outputCurrentWord = self.wordArray[0];
+		if([self.wordArray count])
+			self.outputCurrentWord = self.wordArray[0];
+	
+		if([self.sentenceArray count])
 		self.outputCurrentSentence = self.sentenceArray[0];
-		self.outputCurrentLineEnding = self.lineArray[0];
-		self.outputCurrentParagraph = self.paragraphArray[0];
+
+		if([self.lineArray count])
+			self.outputCurrentLineEnding = self.lineArray[0];
+
+		if([self.paragraphArray count])
+			self.outputCurrentParagraph = self.paragraphArray[0];
     }
     
     if([self didValueForInputKeyChange:@"inputAntialias"])
@@ -569,6 +576,9 @@
 		
 		[self.lineArray addObject:[string substringWithRange:tokenRange]];
 	}
+	
+	if(locale)
+		CFRelease(locale);
 }
 
 @end
