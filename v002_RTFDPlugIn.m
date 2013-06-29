@@ -160,6 +160,11 @@
 	{
 		return @{QCPortAttributeNameKey: @"Sentences"};
 	}
+	
+	if([key isEqualToString:@"outputLineEndings"])
+	{
+		return @{QCPortAttributeNameKey: @"Line Endings"};
+	}
 
 	if([key isEqualToString:@"outputParagraphs"])
 	{
@@ -174,6 +179,11 @@
 	if([key isEqualToString:@"outputCurrentSentence"])
 	{
 		return @{QCPortAttributeNameKey: @"Current Sentence"};
+	}
+	
+	if([key isEqualToString:@"outputCurrentLineEnding"])
+	{
+		return @{QCPortAttributeNameKey: @"Current Line"};
 	}
 
 	if([key isEqualToString:@"outputCurrentParagraph"])
@@ -201,9 +211,11 @@
 			@"outputString",
 			@"outputWords",
 			@"outputSentences",
+			@"outputLineEndings",
 			@"outputParagraphs",
 			@"outputCurrentWord",
 			@"outputCurrentSentence",
+			@"outputCurrentLineEnding",
 			@"outputCurrentParagraph"];
 }
 
