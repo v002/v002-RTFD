@@ -7,9 +7,14 @@
 //
 
 /* It's highly recommended to use CGL macros instead of changing the current context for plug-ins that perform OpenGL rendering */
+#import <OpenGL/OpenGL.h>
 #import <OpenGL/CGLMacro.h>
+#import <Appkit/Appkit.h>
+#import <libkern/OSAtomic.h>
 
 #import "v002_RTFDPlugIn.h"
+
+
 
 #define	kQCPlugIn_Name				@"v002 RTFD"
 #define	kQCPlugIn_Description		@"v002 RTFD description"
@@ -17,15 +22,13 @@
 
 @interface v002_RTFDPlugIn ()
 
-{
-    v002RTFDProvider *provider;
-    OSSpinLock _providerLock;
-}
-@property (atomic, readwrite, strong) dispatch_queue_t rtfdQueue;
+@property (atomic, readwrite, retain) v002RTFDProvider *provider;
 
-@property (atomic, readwrite, strong) NSTextStorage * drawString;
-@property (atomic, readwrite, strong) NSLayoutManager *layoutManager;
-@property (atomic, readwrite, strong) NSTextContainer *textContainer;
+@property (atomic, readwrite, assign) dispatch_queue_t rtfdQueue;
+
+@property (atomic, readwrite, retain) NSTextStorage * drawString;
+@property (atomic, readwrite, retain) NSLayoutManager *layoutManager;
+@property (atomic, readwrite, retain) NSTextContainer *textContainer;
 @property (atomic, readwrite, assign) CGFloat stringSize;
 @property (atomic, readwrite, assign) BOOL antialias;
 @property (atomic, readwrite, assign) BOOL fontSmoothing;
@@ -39,17 +42,47 @@
 @property (atomic, readwrite, assign) CFStringTokenizerRef paragraphTokenizer;
 @property (atomic, readwrite, assign) CFStringTokenizerRef lineTokenizer;
 
-@property (atomic, readwrite, strong) NSMutableArray* wordArray;
-@property (atomic, readwrite, strong) NSMutableArray* sentenceArray;
-@property (atomic, readwrite, strong) NSMutableArray* paragraphArray;
-@property (atomic, readwrite, strong) NSMutableArray* lineArray;
+@property (atomic, readwrite, retain) NSMutableArray* wordArray;
+@property (atomic, readwrite, retain) NSMutableArray* sentenceArray;
+@property (atomic, readwrite, retain) NSMutableArray* paragraphArray;
+@property (atomic, readwrite, retain) NSMutableArray* lineArray;
 
-- (v002RTFDProvider *)newProvider;
-- (void)setAvailableProvider:(v002RTFDProvider *)provider;
+//- (v002RTFDProvider *)newProvider;
+//- (void)setAvailableProvider:(v002RTFDProvider *)provider;
 
 @end
 
+@interface v002_RTFDPlugIn (Execution)
+- (void) asyncCreateOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) w height:(NSUInteger)h;
+- (void) serialCreateOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) w height:(NSUInteger)h;
+- (void) createOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) width height:(NSUInteger)height;
+@end
+
 @implementation v002_RTFDPlugIn
+
+@synthesize provider;
+@synthesize rtfdQueue;
+
+@synthesize drawString;
+@synthesize layoutManager;
+@synthesize textContainer;
+@synthesize stringSize;
+@synthesize antialias;
+@synthesize fontSmoothing;
+
+@synthesize width;
+@synthesize height;
+@synthesize scroll;
+
+@synthesize wordTokenizer;
+@synthesize sentenceTokenizer;
+@synthesize paragraphTokenizer;
+@synthesize lineTokenizer;
+
+@synthesize wordArray;
+@synthesize sentenceArray;
+@synthesize paragraphArray;
+@synthesize lineArray;
 
 @dynamic inputPath;
 @dynamic inputReload;
@@ -203,7 +236,7 @@
             @"inputHeight",
             @"inputPageUp",
             @"inputPageDown",
-            @"inputAsyncronous"
+            @"inputAsyncronous",
             @"inputAntialias",
             @"inputFontSmoothing",
 
@@ -235,7 +268,12 @@
     self = [super init];
 	if(self)
     {
-        self.rtfdQueue = dispatch_queue_create("info.v002.rtfdQueue", NULL);
+		wordTokenizer = NULL;
+		paragraphTokenizer = NULL;
+		sentenceTokenizer = NULL;
+		lineTokenizer = NULL;
+		
+        rtfdQueue = dispatch_queue_create("info.v002.rtfdQueue", DISPATCH_QUEUE_SERIAL);
                 
         _providerLock = OS_SPINLOCK_INIT;
 	}
@@ -246,34 +284,43 @@
 
 - (void) dealloc
 {
-	if(self.wordTokenizer)
-		CFRelease(self.wordTokenizer);
+	//BUG IN CLIENT OF LIBDISPATCH: Release of a suspended object
+	//	dispatch_suspend(rtfdQueue);
+
+	dispatch_release(rtfdQueue);
+	rtfdQueue = NULL;
+
+	if(wordTokenizer)
+		CFRelease(wordTokenizer);
 	
-	if(self.sentenceTokenizer)
-		CFRelease(self.sentenceTokenizer);
+	if(sentenceTokenizer)
+		CFRelease(sentenceTokenizer);
 
-	if(self.sentenceTokenizer)
-		CFRelease(self.sentenceTokenizer);
+	if(paragraphTokenizer)
+		CFRelease(paragraphTokenizer);
 
-	if(self.lineTokenizer)
-		CFRelease(self.lineTokenizer);
+	if(lineTokenizer)
+		CFRelease(lineTokenizer);
+	
+	[super dealloc];
 }
 
-- (v002RTFDProvider *)newProvider
-{
-    OSSpinLockLock(&_providerLock);
-    v002RTFDProvider *result = provider;
-    provider = nil;
-    OSSpinLockUnlock(&_providerLock);
-    return result;
-}
-
-- (void)setAvailableProvider:(v002RTFDProvider *)prov
-{
-    OSSpinLockLock(&_providerLock);
-    provider = prov;
-    OSSpinLockUnlock(&_providerLock);
-}
+//- (v002RTFDProvider *)newProvider
+//{
+//    OSSpinLockLock(&_providerLock);
+//    v002RTFDProvider *result = provider;
+////	[provider release];
+//    provider = nil;
+//    OSSpinLockUnlock(&_providerLock);
+//    return result;
+//}
+//
+//- (void)setAvailableProvider:(v002RTFDProvider *)prov
+//{
+//    OSSpinLockLock(&_providerLock);
+//    provider = prov;
+//    OSSpinLockUnlock(&_providerLock);
+//}
 
 @end
 
@@ -296,7 +343,9 @@
 {
     if([self didValueForInputKeyChange:@"inputPath"] || self.inputReload)
     {
-        self.drawString = [[NSTextStorage alloc] initWithPath:self.inputPath documentAttributes:NULL];
+//		NSDictionary* docAttributes = @{NSViewSizeDocumentAttribute : [NSValue valueWithSize:NSMakeSize(self.inputWidth, self.inputHeight)]};
+		NSDictionary* docAttributes;
+        self.drawString = [[[NSTextStorage alloc] initWithPath:self.inputPath documentAttributes:&docAttributes] autorelease];
         
 		// get our string, and pull our token counts from it
 		[self buildTokenArrays];
@@ -304,10 +353,11 @@
         // TODO: this could probably be optimized away.
         self.stringSize = [self.drawString size].height;
     
-        self.layoutManager = [[NSLayoutManager alloc] init];
+        self.layoutManager = [[[NSLayoutManager alloc] init] autorelease];
         [self.layoutManager setUsesScreenFonts:NO];
-
-        self.textContainer = [[NSTextContainer alloc] initWithContainerSize:NSMakeSize(self.inputWidth, FLT_MAX)];        
+		[self.layoutManager setAllowsNonContiguousLayout:YES];
+		
+        self.textContainer = [[[NSTextContainer alloc] initWithContainerSize:NSMakeSize(self.inputWidth, FLT_MAX)] autorelease];
         
         [self.layoutManager addTextContainer:self.textContainer];
         
@@ -323,16 +373,16 @@
 		self.outputParagraphs = self.paragraphArray;
 		
 		if([self.wordArray count])
-			self.outputCurrentWord = self.wordArray[0];
+			self.outputCurrentWord = [self.wordArray objectAtIndex:0];
 	
 		if([self.sentenceArray count])
-		self.outputCurrentSentence = self.sentenceArray[0];
+			self.outputCurrentSentence = [self.sentenceArray objectAtIndex:0];
 
 		if([self.lineArray count])
-			self.outputCurrentLineEnding = self.lineArray[0];
+			self.outputCurrentLineEnding = [self.lineArray objectAtIndex:0];
 
 		if([self.paragraphArray count])
-			self.outputCurrentParagraph = self.paragraphArray[0];
+			self.outputCurrentParagraph = [self.paragraphArray objectAtIndex:0];
     }
     
     if([self didValueForInputKeyChange:@"inputAntialias"])
@@ -346,21 +396,23 @@
 	   [self didValueForInputKeyChange:@"inputScroll"] ||
 	   [self didValueForInputKeyChange:@"inputPageUp"] ||
 	   [self didValueForInputKeyChange:@"inputPageDown"] )
-    {        
-        
+    {
+		if([self didValueForInputKeyChange:@"inputScroll"])
+		{
+			self.scroll = self.inputScroll;
+		}
+		
         if([self didValueForInputKeyChange:@"inputPageUp"])
         {
-            double pageFactor =  self.inputHeight/self.stringSize;
+            double pageFactor =  self.inputHeight/(self.stringSize * 2.0);
             self.scroll = self.scroll - pageFactor;
         }
         else if([self didValueForInputKeyChange:@"inputPageDown"])
         {
-            double pageFactor =  self.inputHeight/self.stringSize;
+            double pageFactor =  self.inputHeight/(self.stringSize * 2.0);
             
             self.scroll = self.scroll + pageFactor;
         }
-        
-		self.scroll = self.inputScroll;
 		
 		NSUInteger scrollIndexForWord = (NSUInteger)(self.scroll * ((double)self.wordArray.count - 1));
 		NSUInteger scrollIndexForSentence = (NSUInteger)(self.scroll * ((double)self.sentenceArray.count - 1));
@@ -368,17 +420,18 @@
 		NSUInteger scrollIndexForParagraph = (NSUInteger)(self.scroll * ((double)self.paragraphArray.count - 1));
 		
 		if([self.wordArray count] > scrollIndexForWord)
-			self.outputCurrentWord = self.wordArray[scrollIndexForWord];
+			self.outputCurrentWord = [self.wordArray objectAtIndex:scrollIndexForWord];
 		
 		if([self.sentenceArray count] > scrollIndexForSentence)
-			self.outputCurrentSentence = self.sentenceArray[scrollIndexForSentence];
+			self.outputCurrentSentence = [self.sentenceArray objectAtIndex:scrollIndexForSentence];
 		
 		if([self.lineArray count] > scrollIndexForLine)
-			self.outputCurrentLineEnding = self.lineArray[scrollIndexForLine];
+			self.outputCurrentLineEnding = [self.lineArray objectAtIndex:scrollIndexForLine];
 
 		if([self.paragraphArray count] > scrollIndexForParagraph)
-			self.outputCurrentParagraph = self.paragraphArray[scrollIndexForParagraph];
+			self.outputCurrentParagraph = [self.paragraphArray objectAtIndex:scrollIndexForParagraph];
 		
+		// I have no idea what this is about...
         if(self.inputWidth >=100 && self.inputHeight >= 100)
         {
             if(self.inputAsyncronous)
@@ -395,7 +448,7 @@
         }
     }
     
-    v002RTFDProvider *prov = [self newProvider]; // returns retained
+    v002RTFDProvider *prov = self.provider; // returns retained
     if (prov)
     {
         self.outputImage = prov;
@@ -409,14 +462,18 @@
     // Use our own queue, so we have asyncronous, but serial provider creation.
     // we use our own background GL context to do our uploading. Yay and shit.
 
-    dispatch_async(self.rtfdQueue, ^{
-    
-        [self createOutputImageWithContext:context width:w height:h];
-        
+	// Since we own our dispatch queue, and our queue will retain self, we ensure we dont have a temporary or weird retain cycle
+	__block __weak v002_RTFDPlugIn* weakSelf = self;
+    dispatch_async(rtfdQueue, ^
+	{
+		if(weakSelf)
+		{
+			__strong v002_RTFDPlugIn* strongSelf = weakSelf;
+			[strongSelf createOutputImageWithContext:context width:w height:h];
+		}
     });
-    
-    
 }
+
 - (void) serialCreateOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) w height:(NSUInteger)h
 {
     [self createOutputImageWithContext:context width:w height:h];
@@ -442,8 +499,8 @@
 
     if(self.drawString && bitmapImage)
     {
-        NSPoint drawPoint = NSMakePoint(0, -(self.scroll * self.stringSize ));
-        NSRect rect =  NSMakeRect(0, (self.scroll * self.stringSize), w, h);
+        NSPoint drawPoint = NSMakePoint(0, -(self.scroll * (self.stringSize * 2.0) ));
+        NSRect rect =  NSMakeRect(0, (self.scroll * (self.stringSize * 2.0)), w, h);
         
         [NSGraphicsContext saveGraphicsState];
         
@@ -464,8 +521,6 @@
         CGContextSetAllowsFontSubpixelPositioning([flipped graphicsPort], self.fontSmoothing);
         CGContextSetAllowsFontSubpixelQuantization([flipped graphicsPort], self.fontSmoothing);
         
-        
-        
         // This is slower. Layout Manager is the way to go.
         // This nets us 80% CPU for our test text - however justification is correct.
         //[self.drawString drawWithRect:rect options:NSStringDrawingUsesLineFragmentOrigin];
@@ -474,13 +529,14 @@
         //NSRange glyphRange = [self.layoutManager glyphRangeForTextContainer:self.textContainer];
 
         // Only give us the glyphs we need for our rect. ~15 - 30% CPU for our test text 
-        NSRange glyphRange = [self.layoutManager glyphRangeForBoundingRect:rect inTextContainer:self.textContainer];
+//        NSRange glyphRange = [self.layoutManager glyphRangeForBoundingRect:rect inTextContainer:self.textContainer];
+
+		// Possibly even better?
+        NSRange glyphRange = [self.layoutManager glyphRangeForBoundingRectWithoutAdditionalLayout:rect inTextContainer:self.textContainer];
+
+//		[self.layoutManager ensureLayoutForBoundingRect:rect inTextContainer:self.textContainer];
+//		[self.layoutManager ensureGlyphsForGlyphRange:glyphRange];
         
-        //[self.layoutManager ensureLayoutForBoundingRect:rect inTextContainer:self.textContainer];
-        //[self.layoutManager ensureGlyphsForGlyphRange:glyphRange];
-        
-        // Possibly even better?
-        //NSRange glyphRange = [self.layoutManager glyphRangeForBoundingRectWithoutAdditionalLayout:rect inTextContainer:self.textContainer];
         
         [self.layoutManager drawBackgroundForGlyphRange:glyphRange atPoint:drawPoint];
         [self.layoutManager drawGlyphsForGlyphRange: glyphRange atPoint:drawPoint];
@@ -488,8 +544,12 @@
         [NSGraphicsContext restoreGraphicsState];
         
         v002RTFDProvider *prov = [[v002RTFDProvider alloc] initWithBitmapImageRep:bitmapImage];
-        [self setAvailableProvider:prov];
-    }
+		self.provider = prov;
+		[prov release];
+	}
+
+	if(bitmapImage)
+		[bitmapImage autorelease];
 }
 
 - (void) buildTokenArrays
@@ -507,79 +567,86 @@
 	// Build our various tokenizer if we need to, otherwise re-assign them.
 	
 	// Word
-	if(!self.wordTokenizer)
-		self.wordTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitWord, locale);
+	if(!wordTokenizer)
+		wordTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitWord, locale);
 	else
 		CFStringTokenizerSetString(self.wordTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
 	
 	// Sentence
-	if(!self.sentenceTokenizer)
-		self.sentenceTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitSentence, locale);
+	if(!sentenceTokenizer)
+		sentenceTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitSentence, locale);
 	else
 		CFStringTokenizerSetString(self.sentenceTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
 	
 	// Paragraph
-	if(!self.paragraphTokenizer)
-		self.paragraphTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitParagraph, locale);
+	if(!paragraphTokenizer)
+		paragraphTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitParagraph, locale);
 	else
 		CFStringTokenizerSetString(self.paragraphTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
 	
 	// Line
-	if(!self.lineTokenizer)
-		self.lineTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitLineBreak, locale);
+	if(!lineTokenizer)
+		lineTokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)(string), CFRangeMake(0, string.length), kCFStringTokenizerUnitLineBreak, locale);
 	else
 		CFStringTokenizerSetString(self.lineTokenizer, (__bridge CFStringRef)(string), CFRangeMake(0, string.length));
 	
 	// Fill our arrays with the tokenizers output.
 	
 	// Word
-	CFStringTokenizerTokenType tokenType = kCFStringTokenizerTokenNone;
+	CFStringTokenizerTokenType tokenType = CFStringTokenizerAdvanceToNextToken(self.wordTokenizer);
 	
-	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.wordTokenizer)))
+	while(kCFStringTokenizerTokenNone != tokenType)
 	{
 		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.wordTokenizer);
 		
 		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
-
+		
 		[self.wordArray addObject:[string substringWithRange:tokenRange]];
+		
+		tokenType = CFStringTokenizerAdvanceToNextToken(self.wordTokenizer);
 	}
-
-	tokenType = kCFStringTokenizerTokenNone;
 	
-	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.sentenceTokenizer)))
+	tokenType = CFStringTokenizerAdvanceToNextToken(self.sentenceTokenizer);
+	
+	while(kCFStringTokenizerTokenNone != tokenType)
 	{
 		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.sentenceTokenizer);
 		
 		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
 		
 		[self.sentenceArray addObject:[string substringWithRange:tokenRange]];
+		
+		tokenType = CFStringTokenizerAdvanceToNextToken(self.sentenceTokenizer);
 	}
 	
-	tokenType = kCFStringTokenizerTokenNone;
+	tokenType = CFStringTokenizerAdvanceToNextToken(self.paragraphTokenizer);
 	
-	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.paragraphTokenizer)))
+	while(kCFStringTokenizerTokenNone != tokenType)
 	{
 		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.paragraphTokenizer);
 		
 		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
 		
 		[self.paragraphArray addObject:[string substringWithRange:tokenRange]];
+		
+		tokenType = CFStringTokenizerAdvanceToNextToken(self.paragraphTokenizer);
 	}
 	
-	tokenType = kCFStringTokenizerTokenNone;
+	tokenType = CFStringTokenizerAdvanceToNextToken(self.lineTokenizer);
 	
-	while(kCFStringTokenizerTokenNone != (tokenType = CFStringTokenizerAdvanceToNextToken(self.lineTokenizer)))
+	while(kCFStringTokenizerTokenNone != tokenType)
 	{
 		CFRange range = CFStringTokenizerGetCurrentTokenRange(self.lineTokenizer);
 		
 		NSRange tokenRange = NSMakeRange( range.location == kCFNotFound ? NSNotFound : range.location, range.length );
 		
 		[self.lineArray addObject:[string substringWithRange:tokenRange]];
+		
+		tokenType = CFStringTokenizerAdvanceToNextToken(self.lineTokenizer);
 	}
 	
 	if(locale)
-		CFRelease(locale);
-}
+		CFRelease(locale);}
 
 @end
 

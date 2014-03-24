@@ -7,14 +7,36 @@
 //
 
 #import <Quartz/Quartz.h>
-#import <Appkit/Appkit.h>
-#import <OpenGL/OpenGL.h>
-#import <libkern/OSAtomic.h>
 #import "v002RTFDProvider.h"
 
 @interface v002_RTFDPlugIn : QCPlugIn
+{
+    v002RTFDProvider *provider;
+    OSSpinLock _providerLock;
+	
+	// Fuck Obj-C 32 runtime
+	NSTextStorage * drawString;
+	NSLayoutManager *layoutManager;
+	NSTextContainer *textContainer;
+	CGFloat stringSize;
+	BOOL antialias;
+	BOOL fontSmoothing;
+	NSUInteger width;
+	NSUInteger height;
+	double scroll;
+	CFStringTokenizerRef wordTokenizer;
+	CFStringTokenizerRef sentenceTokenizer;
+	CFStringTokenizerRef paragraphTokenizer;
+	CFStringTokenizerRef lineTokenizer;
+	NSMutableArray* wordArray;
+	NSMutableArray* sentenceArray;
+	NSMutableArray* paragraphArray;
+	NSMutableArray* lineArray;
+	
+	dispatch_queue_t rtfdQueue;
+}
 
-@property (strong) NSString* inputPath;
+@property (copy) NSString* inputPath;
 @property (assign) BOOL inputReload;
 @property (assign) NSUInteger inputWidth;
 @property (assign) NSUInteger inputHeight;
@@ -25,23 +47,17 @@
 @property (assign) BOOL inputFontSmoothing;
 @property (assign) BOOL inputAsyncronous;
 
-@property (strong) id <QCPlugInOutputImageProvider> outputImage;
+@property (retain) id <QCPlugInOutputImageProvider> outputImage;
 
-@property (strong) NSString* outputString;
-@property (strong) NSArray* outputWords;
-@property (strong) NSArray* outputSentences;
-@property (strong) NSArray* outputLineEndings;
-@property (strong) NSArray* outputParagraphs;
+@property (retain) NSString* outputString;
+@property (retain) NSArray* outputWords;
+@property (retain) NSArray* outputSentences;
+@property (retain) NSArray* outputLineEndings;
+@property (retain) NSArray* outputParagraphs;
 
 @property (copy) NSString* outputCurrentWord;
 @property (copy) NSString* outputCurrentSentence;
 @property (copy) NSString* outputCurrentLineEnding;
 @property (copy) NSString* outputCurrentParagraph;
 
-@end
-
-@interface v002_RTFDPlugIn (Execution)
-- (void) asyncCreateOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) w height:(NSUInteger)h;
-- (void) serialCreateOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) w height:(NSUInteger)h;
-- (void) createOutputImageWithContext:(id <QCPlugInContext>)context width:(NSUInteger) width height:(NSUInteger)height;
 @end

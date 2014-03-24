@@ -9,20 +9,32 @@
 #import "v002RTFDProvider.h"
 #import <OpenGL/CGLMacro.h>
 
+@interface v002RTFDProvider ()
+@property (atomic, readwrite, retain) NSBitmapImageRep* imageRep;
+@end
+
 @implementation v002RTFDProvider
+
+@synthesize imageRep = _imageRep;
 
 - (id)initWithBitmapImageRep:(NSBitmapImageRep *)imageRep
 {
     self = [super init];
     if (self)
     {
-        _imageRep = imageRep;
+        self.imageRep = imageRep;
     }
     
     return self;
 }
 
-
+- (void) dealloc
+{
+	[_imageRep release];
+	_imageRep = nil;
+	
+	[super dealloc];
+}
 
 - (NSRect)imageBounds
 {
